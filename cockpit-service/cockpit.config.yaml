@@ -1,0 +1,51 @@
+# Cấu hình cho cockpit-manager.sh (đặt cùng thư mục với script)
+
+# Port Cockpit lắng nghe. Mặc định 9090.
+port: 9090
+
+# true nếu có nginx/caddy... đứng trước Cockpit.
+# Khi bật, script thêm Origin không kèm port và ProtocolHeader/ForwardedForHeader
+# vào /etc/cockpit/cockpit.conf.
+reverse_proxy: false
+
+# Các domain/IP dùng để truy cập Cockpit (domain nội bộ, IP VPN...).
+#  - Chỉ ghi domain/IP  -> script sinh https://<domain>:<port>
+#  - Ghi kèm http(s):// -> giữ nguyên, không thêm port
+domains:
+  # - http://localhost:9090
+  # - 127.0.0.1
+
+# Plugin cần có. Mỗi plugin gồm:
+#   name    : tên hiển thị
+#   check   : lệnh trả về exit 0 nếu plugin đã cài (bỏ trống = luôn chạy install)
+#   install : lệnh cài (chạy bằng bash trong thư mục tạm, dừng ở lệnh lỗi đầu tiên)
+# Biến có sẵn trong check/install: $PKG_MGR (apt|dnf|yum), $OS_ID (ubuntu, debian, rocky...)
+plugins:
+  - name: cockpit-files
+    check: cockpit-bridge --packages 2>/dev/null | awk '{print $1}' | grep -qx files
+    install: |
+      # Ưu tiên gói của distro, không có thì build từ source
+      if [ "$PKG_MGR" = apt ]; then
+        apt-get install -y cockpit-files && exit 0
+        apt-get install -y gettext nodejs npm make git
+      else
+        $PKG_MGR install -y cockpit-files && exit 0
+        $PKG_MGR install -y gettext nodejs npm make git
+      fi
+      git clone --depth 1 https://github.com/cockpit-project/cockpit-files.git
+      cd cockpit-files
+      make
+      make install
+
+  # Cần Docker (Compose v2+) hoặc Podman (podman compose) trên server
+  - name: cockpit-compose
+    check: dpkg -s cockpit-compose >/dev/null 2>&1 || rpm -q cockpit-compose >/dev/null 2>&1 || test -d /usr/share/cockpit/cockpit-compose
+    install: |
+      base=https://github.com/RXTX4816/cockpit-compose/releases/latest/download
+      if [ "$PKG_MGR" = apt ]; then
+        curl -fLO "$base/cockpit-compose-latest.deb"
+        apt-get install -y ./cockpit-compose-latest.deb
+      else
+        curl -fLO "$base/cockpit-compose-latest.rpm"
+        $PKG_MGR install -y ./cockpit-compose-latest.rpm
+      fi
